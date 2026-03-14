@@ -182,10 +182,10 @@ async function main() {
 
     if (targets) {
       for (const target of targets) {
-        await update(token, basePath, target, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined, timeoutMs);
+        await update(token, basePath, target, effectiveConcurrency, manifest, freshlyCloned, timeoutMs);
       }
     } else {
-      await update(token, basePath, null, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined, timeoutMs);
+      await update(token, basePath, null, effectiveConcurrency, manifest, freshlyCloned, timeoutMs);
     }
   }
 }

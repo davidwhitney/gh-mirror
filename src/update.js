@@ -46,7 +46,7 @@ export async function update(token, basePath, target, concurrency, manifest, exc
     repos = await discoverLocalRepos(basePath, manifest);
   }
 
-  if (exclude && exclude.size > 0) {
+  if (exclude?.size > 0) {
     repos = repos.filter((r) => !exclude.has(r.path));
   }
 
