@@ -61,6 +61,8 @@ gh-mirror --update "Some*Glob*"
 | `--token <pat>` | GitHub personal access token |
 | `--path <path>` | Base path for repos (default: cwd) |
 | `--concurrency <n>` | Max parallel git operations (default: 10) |
+| `--include-archived` | Include archived repositories (excluded by default) |
+| `--timeout <seconds>` | Git operation timeout in seconds (default: 300) |
 | `--help` | Show help |
 
 ## Manifest
