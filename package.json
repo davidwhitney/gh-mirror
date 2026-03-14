@@ -1,0 +1,32 @@
+{
+  "name": "gh-mirror",
+  "version": "1.0.0",
+  "description": "Clone and update GitHub organisation repositories in bulk",
+  "main": "src/index.js",
+  "bin": {
+    "gh-mirror": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "keywords": [
+    "github",
+    "git",
+    "clone",
+    "organisation",
+    "organization",
+    "repos",
+    "bulk",
+    "parallel"
+  ],
+  "author": "David Whitney",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src/"
+  ]
+}
