@@ -19,6 +19,7 @@ Options:
   --concurrency <n>      Max parallel git operations (default: 10)
   --include-archived     Include archived repositories (excluded by default)
   --timeout <seconds>    Git operation timeout in seconds (default: 300)
+  --force, -f            Force update all repos, ignoring pushed_at check
   --help                 Show this help
 
 Targets:
@@ -42,7 +43,7 @@ Examples:
 `.trim();
 
 function parseCliArgs(argv) {
-  const args = { clone: undefined, update: undefined, token: undefined, path: undefined, concurrency: undefined, timeout: undefined, help: false, includeArchived: false, positional: null };
+  const args = { clone: undefined, update: undefined, token: undefined, path: undefined, concurrency: undefined, timeout: undefined, help: false, includeArchived: false, force: false, positional: null };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -66,6 +67,8 @@ function parseCliArgs(argv) {
       if (nextValue) i++;
     } else if (arg === "--include-archived") {
       args.includeArchived = true;
+    } else if (arg === "--force" || arg === "-f") {
+      args.force = true;
     } else if (arg === "--timeout") {
       args.timeout = nextValue ? parseInt(nextValue, 10) : undefined;
       if (nextValue) i++;
@@ -182,10 +185,10 @@ async function main() {
 
     if (targets) {
       for (const target of targets) {
-        await update(token, basePath, target, effectiveConcurrency, manifest, freshlyCloned, timeoutMs);
+        await update(token, basePath, target, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force);
       }
     } else {
-      await update(token, basePath, null, effectiveConcurrency, manifest, freshlyCloned, timeoutMs);
+      await update(token, basePath, null, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force);
     }
   }
 }

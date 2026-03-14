@@ -1,6 +1,6 @@
 {
   "name": "gh-mirror",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Clone and update GitHub organisation repositories in bulk",
   "url": "https://github.com/davidwhitney/gh-mirror",
   "main": "src/index.js",

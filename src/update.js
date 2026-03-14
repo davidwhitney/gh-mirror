@@ -1,4 +1,4 @@
-import { readdir, access } from "node:fs/promises";
+import { readdir, access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { listRepos } from "./github.js";
 import { pullRepo } from "./git.js";
@@ -29,7 +29,20 @@ async function discoverLocalRepos(basePath, manifest) {
   return repos;
 }
 
-export async function update(token, basePath, target, concurrency, manifest, exclude, timeoutMs) {
+async function getLastFetchTime(repoPath) {
+  // Check FETCH_HEAD first (written on every fetch/pull), fall back to HEAD
+  for (const ref of ["FETCH_HEAD", "HEAD"]) {
+    try {
+      const s = await stat(join(repoPath, ".git", ref));
+      return s.mtime;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+export async function update(token, basePath, target, concurrency, manifest, exclude, timeoutMs, force = false) {
   let repos;
 
   if (target && target.org && !target.pattern) {
@@ -55,9 +68,51 @@ export async function update(token, basePath, target, concurrency, manifest, exc
     return;
   }
 
-  console.log(`Updating ${repos.length} repos (concurrency: ${concurrency})...`);
+  let toUpdate = repos;
 
-  const results = await parallel(repos, concurrency, async (repo) => {
+  if (!force) {
+    // Fetch pushed_at times from GitHub to skip repos that haven't changed
+    const orgsToFetch = [...new Set(repos.map((r) => r.org))];
+    const remoteByKey = new Map();
+    for (const org of orgsToFetch) {
+      try {
+        const remoteRepos = await listRepos(token, org);
+        for (const r of remoteRepos) {
+          remoteByKey.set(`${org}/${r.name}`, r);
+        }
+      } catch {
+        // If we can't fetch remote info, we'll just update everything for this org
+      }
+    }
+
+    // Filter out repos that haven't been pushed since last fetch
+    toUpdate = [];
+    let skipped = 0;
+    for (const repo of repos) {
+      const remote = remoteByKey.get(`${repo.org}/${repo.name}`);
+      if (remote?.pushedAt) {
+        const lastFetch = await getLastFetchTime(repo.path);
+        if (lastFetch && new Date(remote.pushedAt) < lastFetch) {
+          skipped++;
+          continue;
+        }
+      }
+      toUpdate.push(repo);
+    }
+
+    if (skipped > 0) {
+      console.log(`Skipped ${skipped} repos with no remote changes since last fetch`);
+    }
+
+    if (toUpdate.length === 0) {
+      console.log("All repos are up to date.");
+      return;
+    }
+  }
+
+  console.log(`Updating ${toUpdate.length} repos (concurrency: ${concurrency})...`);
+
+  const results = await parallel(toUpdate, concurrency, async (repo) => {
     process.stdout.write(`  updating ${repo.org}/${repo.name}...\n`);
     const output = await pullRepo(repo.path, timeoutMs);
     return { name: `${repo.org}/${repo.name}`, output };
@@ -66,7 +121,7 @@ export async function update(token, basePath, target, concurrency, manifest, exc
   const succeeded = results.filter((r) => r.status === "fulfilled");
   const failed = results.filter((r) => r.status === "rejected");
 
-  console.log(`\nUpdated ${succeeded.length}/${repos.length} repos`);
+  console.log(`\nUpdated ${succeeded.length}/${toUpdate.length} repos`);
   for (const s of succeeded) {
     if (s.value.output && s.value.output !== "Already up to date.") {
       console.log(`  ${s.value.name}: ${s.value.output.split("\n")[0]}`);

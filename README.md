@@ -63,6 +63,7 @@ gh-mirror --update "Some*Glob*"
 | `--concurrency <n>` | Max parallel git operations (default: 10) |
 | `--include-archived` | Include archived repositories (excluded by default) |
 | `--timeout <seconds>` | Git operation timeout in seconds (default: 300) |
+| `--force`, `-f` | Force update all repos, skipping the `pushed_at` check |
 | `--help` | Show help |
 
 ## Manifest
