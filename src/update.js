@@ -29,7 +29,7 @@ async function discoverLocalRepos(basePath, manifest) {
   return repos;
 }
 
-export async function update(token, basePath, target, concurrency, manifest, exclude) {
+export async function update(token, basePath, target, concurrency, manifest, exclude, timeoutMs) {
   let repos;
 
   if (target && target.org && !target.pattern) {
@@ -59,7 +59,7 @@ export async function update(token, basePath, target, concurrency, manifest, exc
 
   const results = await parallel(repos, concurrency, async (repo) => {
     process.stdout.write(`  updating ${repo.org}/${repo.name}...\n`);
-    const output = await pullRepo(repo.path);
+    const output = await pullRepo(repo.path, timeoutMs);
     return { name: `${repo.org}/${repo.name}`, output };
   });
 

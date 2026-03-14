@@ -32,7 +32,7 @@ async function paginate(token, baseUrl) {
     const data = await res.json();
     if (data.length === 0) break;
 
-    repos.push(...data.map((r) => ({ name: r.name, cloneUrl: r.clone_url, sshUrl: r.ssh_url })));
+    repos.push(...data.map((r) => ({ name: r.name, cloneUrl: r.clone_url, sshUrl: r.ssh_url, archived: r.archived })));
     page++;
   }
 

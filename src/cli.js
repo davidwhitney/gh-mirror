@@ -17,6 +17,8 @@ Options:
   --token <token>        GitHub personal access token
   --path <path>          Base path for repos (default: current directory)
   --concurrency <n>      Max parallel git operations (default: 10)
+  --include-archived     Include archived repositories (excluded by default)
+  --timeout <seconds>    Git operation timeout in seconds (default: 300)
   --help                 Show this help
 
 Targets:
@@ -40,7 +42,7 @@ Examples:
 `.trim();
 
 function parseCliArgs(argv) {
-  const args = { clone: undefined, update: undefined, token: undefined, path: undefined, concurrency: undefined, help: false, positional: null };
+  const args = { clone: undefined, update: undefined, token: undefined, path: undefined, concurrency: undefined, timeout: undefined, help: false, includeArchived: false, positional: null };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -61,6 +63,11 @@ function parseCliArgs(argv) {
       if (nextValue) i++;
     } else if (arg === "--path" || arg === "-p") {
       args.path = nextValue;
+      if (nextValue) i++;
+    } else if (arg === "--include-archived") {
+      args.includeArchived = true;
+    } else if (arg === "--timeout") {
+      args.timeout = nextValue ? parseInt(nextValue, 10) : undefined;
       if (nextValue) i++;
     } else if (arg === "--concurrency" || arg === "-n") {
       args.concurrency = nextValue ? parseInt(nextValue, 10) : undefined;
@@ -101,6 +108,7 @@ async function main() {
 
   const basePath = resolve(args.path || process.cwd());
   const concurrency = args.concurrency || undefined;
+  const timeoutMs = args.timeout ? args.timeout * 1000 : undefined;
   const isFirstRun = !(await manifestExists(basePath));
 
   if (isFirstRun) {
@@ -143,7 +151,7 @@ async function main() {
       await saveManifest(basePath, manifest);
 
       for (const target of targets) {
-        const cloned = await clone(token, basePath, target.org, target.pattern, effectiveConcurrency);
+        const cloned = await clone(token, basePath, target.org, target.pattern, effectiveConcurrency, args.includeArchived, timeoutMs);
         if (cloned) for (const p of cloned) freshlyCloned.add(p);
       }
     } else {
@@ -156,7 +164,7 @@ async function main() {
         await saveManifest(basePath, manifest);
       }
       for (const org of manifest.orgs) {
-        const cloned = await clone(token, basePath, org, null, effectiveConcurrency);
+        const cloned = await clone(token, basePath, org, null, effectiveConcurrency, args.includeArchived, timeoutMs);
         if (cloned) for (const p of cloned) freshlyCloned.add(p);
       }
     }
@@ -174,10 +182,10 @@ async function main() {
 
     if (targets) {
       for (const target of targets) {
-        await update(token, basePath, target, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined);
+        await update(token, basePath, target, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined, timeoutMs);
       }
     } else {
-      await update(token, basePath, null, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined);
+      await update(token, basePath, null, effectiveConcurrency, manifest, defaultMode ? freshlyCloned : undefined, timeoutMs);
     }
   }
 }

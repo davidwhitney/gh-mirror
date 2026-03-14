@@ -14,14 +14,21 @@ async function exists(path) {
   }
 }
 
-export async function clone(token, basePath, org, pattern, concurrency) {
+export async function clone(token, basePath, org, pattern, concurrency, includeArchived = false, timeoutMs) {
   console.log(`Fetching repos for ${org}...`);
   const repos = await listRepos(token, org);
   console.log(`Found ${repos.length} repos in ${org}`);
 
   let filtered = repos;
+  if (!includeArchived) {
+    const archivedCount = filtered.filter((r) => r.archived).length;
+    filtered = filtered.filter((r) => !r.archived);
+    if (archivedCount > 0) {
+      console.log(`Excluded ${archivedCount} archived repos (use --include-archived to include them)`);
+    }
+  }
   if (pattern) {
-    filtered = repos.filter((r) => matchGlob(pattern, r.name));
+    filtered = filtered.filter((r) => matchGlob(pattern, r.name));
     console.log(`${filtered.length} repos match pattern "${pattern}"`);
   }
 
@@ -43,7 +50,7 @@ export async function clone(token, basePath, org, pattern, concurrency) {
   const results = await parallel(toClone, concurrency, async (repo) => {
     const dest = join(basePath, org, repo.name);
     process.stdout.write(`  cloning ${org}/${repo.name}...\n`);
-    await cloneRepo(repo.sshUrl, dest);
+    await cloneRepo(repo.sshUrl, dest, timeoutMs);
     return repo.name;
   });
 
