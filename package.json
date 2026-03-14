@@ -11,6 +11,9 @@
     "start": "node src/cli.js",
     "test": "node --test src/**/*.test.js"
   },
+  "repository": {
+    "url": "https://github.com/davidwhitney/gh-mirror"
+  },
   "keywords": [
     "github",
     "git",
