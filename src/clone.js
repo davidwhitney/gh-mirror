@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { listRepos } from "./github.js";
 import { cloneRepo } from "./git.js";
@@ -14,7 +14,7 @@ async function exists(path) {
   }
 }
 
-export async function clone(token, basePath, org, pattern, concurrency, includeArchived = false, timeoutMs) {
+export async function clone(token, basePath, org, pattern, concurrency, includeArchived = false, timeoutMs, recloneOnError = false) {
   console.log(`Fetching repos for ${org}...`);
   const repos = await listRepos(token, org);
   console.log(`Found ${repos.length} repos in ${org}`);
@@ -50,7 +50,14 @@ export async function clone(token, basePath, org, pattern, concurrency, includeA
   const results = await parallel(toClone, concurrency, async (repo) => {
     const dest = join(basePath, org, repo.name);
     process.stdout.write(`  cloning ${org}/${repo.name}...\n`);
-    await cloneRepo(repo.sshUrl, dest, timeoutMs);
+    try {
+      await cloneRepo(repo.sshUrl, dest, timeoutMs);
+    } catch (err) {
+      if (!recloneOnError) throw err;
+      process.stdout.write(`  clone failed for ${org}/${repo.name}, removing partial checkout and retrying...\n`);
+      await rm(dest, { recursive: true, force: true });
+      await cloneRepo(repo.sshUrl, dest, timeoutMs);
+    }
     return repo.name;
   });
 

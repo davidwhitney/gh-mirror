@@ -2,6 +2,7 @@
 
 import { clone } from "./clone.js";
 import { update } from "./update.js";
+import { clean } from "./clean.js";
 import { loadManifest, saveManifest, manifestExists } from "./manifest.js";
 import { resolve } from "node:path";
 import { getToken } from "./auth.js";
@@ -10,16 +11,23 @@ const HELP = `
 Usage: gh-mirror [options] [target]
 
 By default (no --clone or --update flag), both clone and update are run.
+Inactive repos are moved to .removed and failed clones/pulls are re-cloned
+unless disabled with --no-clean-inactive / --no-reclone-on-error.
 
 Options:
   --clone [target]       Clone repositories only
   --update [target]      Update (pull) repositories only
+  --clean-inactive       Move archived / removed repos to .removed (default on)
+  --no-clean-inactive    Don't move inactive repos to .removed
+  --delete-inactive      Permanently delete inactive repos instead of archiving
   --token <token>        GitHub personal access token
   --path <path>          Base path for repos (default: current directory)
   --concurrency <n>      Max parallel git operations (default: 10)
   --include-archived     Include archived repositories (excluded by default)
   --timeout <seconds>    Git operation timeout in seconds (default: 300)
   --force, -f            Force update all repos, ignoring pushed_at check
+  --reclone-on-error     Remove and re-clone repos that fail to clone/pull (default on)
+  --no-reclone-on-error  Report clone/pull failures instead of re-cloning
   --help                 Show this help
 
 Targets:
@@ -40,10 +48,12 @@ Examples:
   gh-mirror --update                       # update only
   gh-mirror --update "Some*Glob*"
   gh-mirror --concurrency 8 --clone MyOrg
+  gh-mirror --no-reclone-on-error MyOrg     # report pull failures, don't re-clone
+  gh-mirror --no-clean-inactive MyOrg       # skip moving archived/removed repos
 `.trim();
 
 function parseCliArgs(argv) {
-  const args = { clone: undefined, update: undefined, token: undefined, path: undefined, concurrency: undefined, timeout: undefined, help: false, includeArchived: false, force: false, positional: null };
+  const args = { clone: undefined, update: undefined, cleanInactive: true, deleteInactive: false, token: undefined, path: undefined, concurrency: undefined, timeout: undefined, help: false, includeArchived: false, force: false, recloneOnError: true, positional: null };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -65,10 +75,20 @@ function parseCliArgs(argv) {
     } else if (arg === "--path" || arg === "-p") {
       args.path = nextValue;
       if (nextValue) i++;
+    } else if (arg === "--clean-inactive") {
+      args.cleanInactive = true;
+    } else if (arg === "--no-clean-inactive") {
+      args.cleanInactive = false;
+    } else if (arg === "--delete-inactive") {
+      args.deleteInactive = true;
     } else if (arg === "--include-archived") {
       args.includeArchived = true;
     } else if (arg === "--force" || arg === "-f") {
       args.force = true;
+    } else if (arg === "--reclone-on-error") {
+      args.recloneOnError = true;
+    } else if (arg === "--no-reclone-on-error") {
+      args.recloneOnError = false;
     } else if (arg === "--timeout") {
       args.timeout = nextValue ? parseInt(nextValue, 10) : undefined;
       if (nextValue) i++;
@@ -102,7 +122,8 @@ async function main() {
     process.exit(0);
   }
 
-  // Default mode: both clone and update
+  // Default mode: both clone and update. Clean-inactive runs on top of whatever
+  // clone/update do (both default on), so it doesn't affect this decision.
   const defaultMode = args.clone === undefined && args.update === undefined;
   if (defaultMode) {
     args.clone = args.positional || true;
@@ -154,7 +175,7 @@ async function main() {
       await saveManifest(basePath, manifest);
 
       for (const target of targets) {
-        const cloned = await clone(token, basePath, target.org, target.pattern, effectiveConcurrency, args.includeArchived, timeoutMs);
+        const cloned = await clone(token, basePath, target.org, target.pattern, effectiveConcurrency, args.includeArchived, timeoutMs, args.recloneOnError);
         if (cloned) for (const p of cloned) freshlyCloned.add(p);
       }
     } else {
@@ -167,7 +188,7 @@ async function main() {
         await saveManifest(basePath, manifest);
       }
       for (const org of manifest.orgs) {
-        const cloned = await clone(token, basePath, org, null, effectiveConcurrency, args.includeArchived, timeoutMs);
+        const cloned = await clone(token, basePath, org, null, effectiveConcurrency, args.includeArchived, timeoutMs, args.recloneOnError);
         if (cloned) for (const p of cloned) freshlyCloned.add(p);
       }
     }
@@ -185,10 +206,29 @@ async function main() {
 
     if (targets) {
       for (const target of targets) {
-        await update(token, basePath, target, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force);
+        await update(token, basePath, target, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force, args.recloneOnError);
       }
     } else {
-      await update(token, basePath, null, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force);
+      await update(token, basePath, null, effectiveConcurrency, manifest, freshlyCloned, timeoutMs, args.force, args.recloneOnError);
+    }
+  }
+
+  if (args.cleanInactive || args.deleteInactive) {
+    const manifest = await loadManifest(basePath);
+    // Scope cleaning to the same target the run operated on, falling back to the
+    // whole manifest when no explicit target was given.
+    const cleanValue =
+      args.positional ||
+      (typeof args.clone === "string" ? args.clone : null) ||
+      (typeof args.update === "string" ? args.update : null);
+    const targets = parseTargets(cleanValue);
+
+    if (targets) {
+      for (const target of targets) {
+        await clean(token, basePath, target, manifest, args.includeArchived, args.deleteInactive);
+      }
+    } else {
+      await clean(token, basePath, null, manifest, args.includeArchived, args.deleteInactive);
     }
   }
 }

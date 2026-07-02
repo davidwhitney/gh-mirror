@@ -1,11 +1,11 @@
-import { readdir, access, stat } from "node:fs/promises";
+import { readdir, access, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { listRepos } from "./github.js";
-import { pullRepo } from "./git.js";
+import { pullRepo, cloneRepo } from "./git.js";
 import { matchGlob } from "./glob.js";
 import { parallel } from "./parallel.js";
 
-async function discoverLocalRepos(basePath, manifest) {
+export async function discoverLocalRepos(basePath, manifest) {
   const repos = [];
   for (const org of manifest.orgs) {
     const orgDir = join(basePath, org);
@@ -42,22 +42,24 @@ async function getLastFetchTime(repoPath) {
   return null;
 }
 
-export async function update(token, basePath, target, concurrency, manifest, exclude, timeoutMs, force = false) {
-  let repos;
-
+// Resolve the local repos a target refers to. Shared by update and clean.
+export async function selectRepos(basePath, target, manifest) {
   if (target && target.org && !target.pattern) {
     if (manifest.orgs.includes(target.org)) {
-      repos = await discoverLocalRepos(basePath, { orgs: [target.org] });
-    } else {
-      const allRepos = await discoverLocalRepos(basePath, manifest);
-      repos = allRepos.filter((r) => matchGlob(target.org, r.name) || matchGlob(target.org, `${r.org}/${r.name}`));
+      return await discoverLocalRepos(basePath, { orgs: [target.org] });
     }
-  } else if (target && target.pattern) {
-    const orgRepos = await discoverLocalRepos(basePath, { orgs: [target.org] });
-    repos = orgRepos.filter((r) => matchGlob(target.pattern, r.name));
-  } else {
-    repos = await discoverLocalRepos(basePath, manifest);
+    const allRepos = await discoverLocalRepos(basePath, manifest);
+    return allRepos.filter((r) => matchGlob(target.org, r.name) || matchGlob(target.org, `${r.org}/${r.name}`));
   }
+  if (target && target.pattern) {
+    const orgRepos = await discoverLocalRepos(basePath, { orgs: [target.org] });
+    return orgRepos.filter((r) => matchGlob(target.pattern, r.name));
+  }
+  return await discoverLocalRepos(basePath, manifest);
+}
+
+export async function update(token, basePath, target, concurrency, manifest, exclude, timeoutMs, force = false, recloneOnError = false) {
+  let repos = await selectRepos(basePath, target, manifest);
 
   if (exclude?.size > 0) {
     repos = repos.filter((r) => !exclude.has(r.path));
@@ -68,12 +70,11 @@ export async function update(token, basePath, target, concurrency, manifest, exc
     return;
   }
 
-  let toUpdate = repos;
-
-  if (!force) {
-    // Fetch pushed_at times from GitHub to skip repos that haven't changed
+  // Fetch remote info when we need it: to skip unchanged repos (non-force),
+  // or to look up clone URLs for re-cloning broken repos.
+  const remoteByKey = new Map();
+  if (!force || recloneOnError) {
     const orgsToFetch = [...new Set(repos.map((r) => r.org))];
-    const remoteByKey = new Map();
     for (const org of orgsToFetch) {
       try {
         const remoteRepos = await listRepos(token, org);
@@ -84,7 +85,11 @@ export async function update(token, basePath, target, concurrency, manifest, exc
         // If we can't fetch remote info, we'll just update everything for this org
       }
     }
+  }
 
+  let toUpdate = repos;
+
+  if (!force) {
     // Filter out repos that haven't been pushed since last fetch
     toUpdate = [];
     let skipped = 0;
@@ -113,9 +118,23 @@ export async function update(token, basePath, target, concurrency, manifest, exc
   console.log(`Updating ${toUpdate.length} repos (concurrency: ${concurrency})...`);
 
   const results = await parallel(toUpdate, concurrency, async (repo) => {
-    process.stdout.write(`  updating ${repo.org}/${repo.name}...\n`);
-    const output = await pullRepo(repo.path, timeoutMs);
-    return { name: `${repo.org}/${repo.name}`, output };
+    const name = `${repo.org}/${repo.name}`;
+    process.stdout.write(`  updating ${name}...\n`);
+    try {
+      const output = await pullRepo(repo.path, timeoutMs);
+      return { name, output };
+    } catch (err) {
+      if (!recloneOnError) throw err;
+      const remote = remoteByKey.get(name);
+      const url = remote?.sshUrl;
+      if (!url) {
+        throw new Error(`${name}: pull failed and no remote URL available to re-clone: ${err.message}`);
+      }
+      process.stdout.write(`  pull failed for ${name}, removing and re-cloning...\n`);
+      await rm(repo.path, { recursive: true, force: true });
+      await cloneRepo(url, repo.path, timeoutMs);
+      return { name, output: "re-cloned" };
+    }
   });
 
   const succeeded = results.filter((r) => r.status === "fulfilled");
